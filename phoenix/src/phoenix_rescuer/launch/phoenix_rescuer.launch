@@ -1,0 +1,80 @@
+<launch>
+
+    <arg name="use_rosbot" default="false"/>
+    <arg name="use_gazebo" default="true"/>
+
+    <node pkg="gmapping" type="slam_gmapping" name='gmapping_node'>
+        <param name="base_frame" value="base_link"/>
+        <param name="odom_frame" value="odom"/>
+        <param name="delta" value="0.01"/>
+        <param name="xmin" value="-5"/>
+        <param name="ymin" value="-5"/>
+        <param name="xmax" value="5"/>
+        <param name="ymax" value="5"/>
+        <param name="maxUrange" value="5"/>
+        <param name="map_update_interval" value="1"/>
+        <param name="linearUpdate" value="0.01"/>
+        <param name="angularUpdate" value="0.01"/>
+        <param name="temporalUpdate" value="0.05"/>
+        <param name="particles" value="120"/>
+    </node>
+
+    <!-- Various Necessary Transforms -->
+    <node if="$(arg use_rosbot)" pkg="tf" type="static_transform_publisher" name="laser_tf_broadcaster" args="0 0 0 3.14 0 0 base_link laser_frame 100" />
+    <node name="base_to_camera_tf" pkg="tf" type="static_transform_publisher" args="-0.03 0.0 0.18 0 0 0 /base_link /camera_link 100" />
+    <node if="$(arg use_rosbot)" pkg="phoenix_rescuer" type="pose_to_tf.py" name="pose_to_tf"/>
+
+    <!-- Start hardware features -->
+    <node if="$(arg use_rosbot)" pkg="husarion_ros" type="serial_bridge.sh" name="odometry_serial_bridge"/>
+    <node if="$(arg use_rosbot)" pkg="rplidar_ros" type="rplidarNode" name="rplidar">
+        <param name="angle_compensate" type="bool" value="true"/>
+        <param name="serial_baudrate" type="int" value="115200"/><!--model A2 (ROSbot 2.0) -->
+    </node>
+
+      
+    <!-- See https://github.com/orbbec/ros_astra_launch/blob/master/launch/astra.launch -->
+    <!--include file="$(find astra_launch)/launch/astra.launch"-->
+        <!-- We don't require depth processing -->
+        <!--arg name="depth_processing" value="false"/-->
+        <!--arg name="depth_registered_processing" value="false"/-->
+    <!--/include-->
+
+    <include if="$(arg use_rosbot)" file="$(find astra_launch)/launch/astra.launch">
+    <!-- We don't require depth processing -->
+    <arg name="depth_processing" value="false"/>
+    <arg name="depth_registered_processing" value="false"/>
+    </include>
+
+        
+
+    <!-- Include robot description so we can see it in rviz & so that the tf hierarchy is correct -->
+    <include if="$(arg use_rosbot)" file="$(find phoenix_rescuer)/launch/rosbot_specification.launch"/>
+
+    <!-- If running in gazebo, start gazebo environment -->
+    <!--include if="$(arg use_gazebo)" file="$(find rosbot_description)/launch/maze_world.launch"-->
+    <include if="$(arg use_gazebo)" file="$(find rosbot_description)/launch/rosbot_rviz.launch"/>    
+
+    <!-- AR Detection Feature Nodes -->
+    <arg name="marker_size" default="8.0" />
+    <arg name="max_new_marker_error" default="0.05" />
+    <arg name="max_track_error" default="0.05" />
+    <arg name="cam_image_topic"      default="/camera/rgb/image_raw" />
+    <arg name="cam_info_topic"       default="/camera/rgb/camera_info" />
+    <arg name="output_frame"         default="map" />
+    <arg name="bundle_files" default="$(find seek_and_steer)/bundles/tags0_5.xml $(find seek_and_steer)/bundles/tags6_11.xml"/>
+    <node name="ar_track_alvar" pkg="ar_track_alvar" type="findMarkerBundlesNoKinect" respawn="false" output="screen" args="$(arg marker_size) $(arg max_new_marker_error) $(arg max_track_error) $(arg cam_image_topic) $(arg cam_info_topic) $(arg output_frame) $(arg bundle_files)" />
+    
+    <!-- Path Planning Node -->
+    <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+        <rosparam file="$(find phoenix_rescuer)/configs/costmap_common_params.yaml" command="load" ns="global_costmap"/>
+        <rosparam file="$(find phoenix_rescuer)/configs/costmap_common_params.yaml" command="load" ns="local_costmap"/>
+        <rosparam file="$(find phoenix_rescuer)/configs/local_costmap_params.yaml" command="load"/>
+        <rosparam file="$(find phoenix_rescuer)/configs/global_costmap_params.yaml" command="load"/>
+        <rosparam file="$(find phoenix_rescuer)/configs/trajectory_planner.yaml" command="load"/>
+        <param name="move_base/DWAPlannerROS/yaw_goal_tolerance" value="1.0"/>
+        <param name="move_base/DWAPlannerROS/xy_goal_tolerance" value="2.0"/>
+    </node>
+
+    <!-- Main Controller -->
+    <!-- <node pkg="phoenix_rescuer" type="main_controller.py" name="main_controller" /> -->
+</launch>
